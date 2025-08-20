@@ -1,66 +1,103 @@
-version: '3'
+# Este é o arquivo de configuração para o ambiente de DESENVOLVIMENTO
 
 services:
-  base: &base
-    build:
-      context: .
-      dockerfile: ./docker/Dockerfile
-      args:
-        BUNDLE_WITHOUT: 'development:test'
-        EXECJS_RUNTIME: Disabled
-        RAILS_ENV: 'production'
-        RAILS_SERVE_STATIC_FILES: 'true'
-    image: chatwoot:latest
-    env_file: .env ## Change this file for customized env variables
-
-  rails:
-    <<: *base
-    image: chatwoot:latest
-    depends_on:
-      - postgres
-      - redis
-    ports:
-      - 3000:3000
-    environment:
-      - NODE_ENV=production
-      - RAILS_ENV=production
-    entrypoint: docker/entrypoints/rails.sh
-    command: ['bundle', 'exec', 'rails', 's', '-p', '3000', '-b', '0.0.0.0']
-
-  sidekiq:
-    <<: *base
-    image: chatwoot:latest
-    depends_on:
-      - postgres
-      - redis
-    environment:
-      - NODE_ENV=production
-      - RAILS_ENV=production
-    command: ['bundle', 'exec', 'sidekiq', '-C', 'config/sidekiq.yml']
-
   postgres:
     image: pgvector/pgvector:pg16
     restart: always
     ports:
       - '5432:5432'
     volumes:
-      - postgres:/data/postgres
-    environment:
-      - POSTGRES_DB=chatwoot
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=
+      - chatwoot_postgres:/var/lib/postgresql/data
+    env_file: .env # <-- Linha mais importante: lê as senhas do .env
 
   redis:
-    image: redis:alpine
+    image: redis:7.0-alpine
     restart: always
-    volumes:
-      - redis:/data/redis
+    command: redis-server --requirepass ${REDIS_PASSWORD} # <-- Usa a senha do .env
     ports:
       - '6379:6379'
+    volumes:
+      - chatwoot_redis:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 1s
+      timeout: 3s
+      retries: 30
+
+  base:
+    build:
+      context: .
+      target: base
+    image: chatwoot:development
+
+  rails:
+    depends_on:
+      postgres:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    build:
+      context: .
+      target: development
+    image: chatwoot-rails:development
+    ports:
+      - '3000:3000'
+    env_file: .env
+    environment:
+      - HISTFILE=/app/log/.bash_history
+      - BUNDLE_PATH=/bundle
+      - WEBPACKER_DEV_SERVER_HOST=0.0.0.0
+    volumes:
+      - .:/app
+      - chatwoot_bundle:/bundle
+      - chatwoot_packs:/app/public/packs
+      - chatwoot_node_modules:/app/node_modules
+      - /app/.git
+    entrypoint: docker/entrypoints/rails.sh
+
+  sidekiq:
+    depends_on:
+      rails:
+        condition: service_started
+    build:
+      context: .
+      target: development
+    image: chatwoot-rails:development
+    env_file: .env
+    environment:
+      - HISTFILE=/app/log/.bash_history
+      - BUNDLE_PATH=/bundle
+    volumes:
+      - .:/app
+      - chatwoot_bundle:/bundle
+      - chatwoot_packs:/app/public/packs
+      - chatwoot_node_modules:/app/node_modules
+      - /app/.git
+    command: bundle exec sidekiq -C config/sidekiq.yml
+
+  vite:
+    build:
+      context: .
+      dockerfile: ./vite.Dockerfile
+    image: chatwoot-vite:development
+    ports:
+      - '3036:3036'
+    env_file: .env
+    volumes:
+      - .:/app
+      - chatwoot_packs:/app/public/packs
+      - chatwoot_node_modules:/app/node_modules
+      - /app/.git
+
+  mailhog:
+    image: mailhog/mailhog
+    ports:
+      - '1025:1025'
+      - '8025:8025'
 
 volumes:
-  postgres:
-  redis:
-  bundle:
-  packs:
-  node_modules_rails:
+  chatwoot_postgres:
+  chatwoot_redis:
+  chatwoot_bundle:
+  chatwoot_packs:
+  chatwoot_node_modules:

@@ -82,17 +82,15 @@ services:
     entrypoint: docker/entrypoints/vite.sh
     command: bin/vite dev
 
+  # Bloco Postgres com a indentação e volume corrigidos
   postgres:
     image: pgvector/pgvector:pg16
     restart: always
+    env_file: .env # <-- Linha que lê as senhas do arquivo .env
     ports:
       - '5432:5432'
     volumes:
-      - postgres:/data/postgres
-    environment:
-      - POSTGRES_DB=chatwoot
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=
+      - chatwoot_postgres:/var/lib/postgresql/data # <-- Volume correto
 
   redis:
     image: redis:alpine
@@ -110,8 +108,9 @@ services:
       - 1025:1025
       - 8025:8025
 
+# Seção de volumes com o nome do postgres corrigido
 volumes:
-  postgres:
+  chatwoot_postgres:
   redis:
   packs:
   node_modules:
